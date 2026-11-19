@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Messages</title>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --card: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121212;
+      --card: #1e1e1e;
+      --text: #f2f2f2;
+      --muted: #9ca3af;
+      --border: #333;
+      --accent: #60a5fa;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 1.4rem; margin: 0 0 16px; }
+  .setup, .toolbar { margin-bottom: 16px; }
+  input, button {
+    font-size: 15px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+  }
+  input { width: 100%; margin-bottom: 8px; }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    cursor: pointer;
+    width: 100%;
+  }
+  .msg {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .msg .sender { font-weight: 600; }
+  .msg .time { color: var(--muted); font-size: 0.8rem; float: right; }
+  .msg .body { margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
+  .status { color: var(--muted); font-size: 0.9rem; margin-bottom: 12px; }
+  .hidden { display: none; }
+  a.reset { color: var(--muted); font-size: 0.8rem; display: block; text-align: center; margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Messages</h1>
+
+  <div id="setup" class="setup hidden">
+    <input id="scriptUrl" placeholder="Apps Script Web App URL">
+    <input id="apiKey" placeholder="API Key">
+    <button id="saveBtn">Save &amp; Load</button>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="toolbar">
+      <input id="search" placeholder="Search by sender or text...">
+    </div>
+    <div id="status" class="status">Loading...</div>
+    <div id="list"></div>
+    <a href="#" class="reset" id="resetLink">Reset connection settings</a>
+  </div>
+</div>
+
+<script>
+  var LS_URL = 'sms_dashboard_script_url';
+  var LS_KEY = 'sms_dashboard_api_key';
+  var allMessages = [];
+
+  function el(id) { return document.getElementById(id); }
+
+  function showSetup() {
+    el('setup').classList.remove('hidden');
+    el('main').classList.add('hidden');
+  }
+
+  function showMain() {
+    el('setup').classList.add('hidden');
+    el('main').classList.remove('hidden');
+  }
+
+  function escapeHtml(str) {
+    var d = document.createElement('div');
+    d.textContent = str == null ? '' : String(str);
+    return d.innerHTML;
+  }
+
+  function render(messages) {
+    var list = el('list');
+    list.innerHTML = '';
+    if (messages.length === 0) {
+      list.innerHTML = '<div class="status">No messages found.</div>';
+      return;
+    }
+    messages.forEach(function (m) {
+      var div = document.createElement('div');
+      div.className = 'msg';
+      var when = m.receivedAt || m.loggedAt || '';
+      div.innerHTML =
+        '<span class="sender">' + escapeHtml(m.sender) + '</span>' +
+        '<span class="time">' + escapeHtml(when) + '</span>' +
+        '<div class="body">' + escapeHtml(m.body) + '</div>';
+      list.appendChild(div);
+    });
+  }
+
+  function applySearch() {
+    var q = el('search').value.trim().toLowerCase();
+    if (!q) { render(allMessages); return; }
+    var filtered = allMessages.filter(function (m) {
+      return (m.sender || '').toLowerCase().indexOf(q) !== -1 ||
+             (m.body || '').toLowerCase().indexOf(q) !== -1;
+    });
+    render(filtered);
+  }
+
+  function loadMessages() {
+    var url = localStorage.getItem(LS_URL);
+    var key = localStorage.getItem(LS_KEY);
+    if (!url || !key) { showSetup(); return; }
+    showMain();
+    el('status').textContent = 'Loading...';
+    fetch(url + '?apiKey=' + encodeURIComponent(key))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.error) {
+          el('status').textContent = 'Error: ' + data.error;
+          return;
+        }
+        allMessages = data || [];
+        el('status').textContent = allMessages.length + ' message(s)';
+        render(allMessages);
+      })
+      .catch(function (err) {
+        el('status').textContent = 'Failed to load: ' + err;
+      });
+  }
+
+  el('saveBtn').addEventListener('click', function () {
+    var url = el('scriptUrl').value.trim();
+    var key = el('apiKey').value.trim();
+    if (!url || !key) { return; }
+    try {
+      localStorage.setItem(LS_URL, url);
+      localStorage.setItem(LS_KEY, key);
+    } catch (e) {}
+    loadMessages();
+  });
+
+  el('resetLink').addEventListener('click', function (e) {
+    e.preventDefault();
+    try {
+      localStorage.removeItem(LS_URL);
+      localStorage.removeItem(LS_KEY);
+    } catch (err) {}
+    showSetup();
+  });
+
+  el('search').addEventListener('input', applySearch);
+
+  loadMessages();
+</script>
+</body>
+</html>
